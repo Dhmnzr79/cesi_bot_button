@@ -6,6 +6,8 @@
 
 ## Архитектура: диалог по **subtopic**, не только по **topic** (зафиксировано)
 
+**Реализация в репозитории:** пошагово — **`info/agentflow_subtopic.md`** (Start, Qdrant, CF после ретривера, Load Conversion Map, Main LLM, Parse).
+
 **Правильное понимание:** бот держит диалог по **SUBTOPIC**, а не только по **TOPIC**.
 
 ### Как это должно работать (сценарий)
@@ -44,7 +46,7 @@
 
 См. также `info/temp.md`, `info/about.md`.
 
-- [ ] Start: ключи state согласованы с topic + **subtopic**.
+- [ ] Start: ключи state согласованы с topic + **subtopic** (см. `agentflow_subtopic.md`).
 - [ ] Qdrant: фильтр по метаданным + query.
 - [ ] Main LLM / Parse: обновление `meta_topic` и **`meta_subtopic`**.
 - [ ] Остальные пункты из прежней сборки (Router, IF, Parse…).
@@ -106,4 +108,4 @@
 
 ## Решения / сделано
 
-- _(пока пусто)_
+- **Subtopic в архитектуре:** инструкция и чеклист — `info/agentflow_subtopic.md`; обновлены `start_flow_state.md`, `about.md`, блок контекста в `prompt.legacy.md`, ссылка в этом файле.
