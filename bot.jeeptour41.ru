@@ -1,9 +1,16 @@
 server {
     server_name bot.jeeptour41.ru;
 
-    # Статика виджета
+    # Статика виджета v1 (прод)
     location /widget/ {
         alias /var/www/html/widget/;
+        try_files $uri =404;
+        add_header Cache-Control "no-cache";
+    }
+
+    # Статика виджета v2 (тест на том же домене; каталог на диске: /var/www/html/widget-test/)
+    location /widget-test/ {
+        alias /var/www/html/widget-test/;
         try_files $uri =404;
         add_header Cache-Control "no-cache";
     }

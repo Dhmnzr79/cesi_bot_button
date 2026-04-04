@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "description": "Видео в ответе: совпадение meta_topic + meta_subtopic (регистр subtopic не важен). Пустой url — слот не используется. Заполняется только при leadIntent = none; перезаписывает video из JSON модели, если для пары topic+subtopic есть запись здесь."
+  },
+  "by_topic": {
+    "implantation": {
+      "by_subtopic": {
+        "pain": {
+          "url": "https://s3.twcstorage.ru/denisart-cloud/cesi_khan.mp4",
+          "title": "Видео ЦЭСИ"
+        },
+        "osseointegration": {
+          "url": "https://s3.twcstorage.ru/denisart-cloud/cesi_khan.mp4",
+          "title": "Видео ЦЭСИ"
+        }
+      }
+    }
+  }
+}

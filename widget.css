@@ -1,3 +1,4 @@
+/* Виджет ЦЭСИ — стили без привязки к URL; кладите рядом с widget.js (v1: /widget/, v2: /widget-test/). */
 /* Закрытый виджет (State 0) */
 .botWidgetClosed {
   position: fixed;
@@ -609,4 +610,60 @@
 
 .botSuggestedItem:hover {
   background: #e5ebf2;
+}
+
+/* Followup → видео (раскрытие по клику) → ситуация → CTA */
+.botVideoRevealWrap,
+.botSituationWrap {
+  margin: 6px 0 4px;
+}
+
+.botVideoToggleBtn,
+.botSituationBtn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+}
+
+.botVideoToggleBtn {
+  background: #eef6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.botVideoToggleBtn:hover {
+  background: #dbeafe;
+}
+
+.botSituationBtn {
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+
+.botSituationBtn:hover {
+  background: #f1f5f9;
+}
+
+.botVideoEmbed {
+  margin-top: 8px;
+  max-width: 100%;
+}
+
+.botVideoEmbed video {
+  max-width: 100%;
+  border-radius: 8px;
+  display: block;
+}
+
+.botVideoEmbedCaption {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 6px;
 }

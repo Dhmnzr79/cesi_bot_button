@@ -1,5 +1,8 @@
-// Виджет ЦЭСИ. Для работы аватара: avatar.png должен быть в /widget/ на сервере (рядом с widget.js).
+// Виджет ЦЭСИ (только прод). Статика: /widget/ или /widget-test/ — префикс по src скрипта.
+// avatar.png — рядом с widget.js.
 console.log("WIDGET JS LOADED");
+// Только здесь (синхронно): внутри DOMContentLoaded document.currentScript уже null → иначе всегда /widget/
+const CESI_WIDGET_SCRIPT_SRC = (document.currentScript && document.currentScript.src) || "";
 
 function ensureWidgetFont() {
   if (document.getElementById("cesi-widget-font")) return;
@@ -31,15 +34,18 @@ ensureViewportForKeyboard();
 document.addEventListener("DOMContentLoaded", () => {
 
 (() => {
-  // 1) AgentFlow ID из Flowise (именно AgentFlow, не Chatflow)
-  const AGENTFLOW_ID = "8bbbe87b-73c5-4a46-8feb-7c13d69e6a40";
+  const apiHost = "https://bot.jeeptour41.ru";
+  const chatflowid = "6dcd1df0-45ae-41a1-ab4e-0080a1e8106a";
 
-  // 2) URL Flowise
-  const FLOWISE_BASE = "https://bot.jeeptour41.ru";
+  const WIDGET_PUBLIC_PREFIX = /\/widget-test\//i.test(CESI_WIDGET_SCRIPT_SRC) ? "/widget-test" : "/widget";
+
+  const WIDGET_STATIC_BASE = apiHost;
+  const WIDGET_CSS_HREF = `${WIDGET_STATIC_BASE}${WIDGET_PUBLIC_PREFIX}/widget.css`;
+  const AVATAR_PATH = `${WIDGET_PUBLIC_PREFIX}/avatar.png`;
+
   const PAGE_LOAD_TIME = Date.now();
 
-  // 3) Prediction API (Flow ID — тот же AgentFlow ID по докам)
-  const ENDPOINT = `${FLOWISE_BASE}/api/v1/prediction/${AGENTFLOW_ID}`;
+  const ENDPOINT = `${apiHost}/api/v1/prediction/${chatflowid}`;
 
   // Session management: один sessionId на пользователя, TTL 24 часа
   const SESSION_STORAGE_KEY = "cesi_chat_session_id";
@@ -75,10 +81,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // ---- UI ----
   const css = document.createElement("link");
   css.rel = "stylesheet";
-  css.href = `${FLOWISE_BASE}/widget/widget.css`;
+  css.href = WIDGET_CSS_HREF;
   document.head.appendChild(css);
 
-  const AVATAR_URL = `${FLOWISE_BASE}/widget/avatar.png`;
+  const AVATAR_URL = `${WIDGET_STATIC_BASE}${AVATAR_PATH}`;
 
   const btn = document.createElement("div");
   btn.id = "botWidgetBtn";
@@ -161,11 +167,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // Количество ответов бота в текущей сессии (для глобального CTA по длине диалога)
     botAnswerCount: 0,
     // Текущая тема по сигналу модели (meta_topic)
-    currentTopic: 'other'
+    currentTopic: 'other',
+    /** true после клика «Рассказать о своей ситуации» до «Назад» или успешного ввода текста (фолбэк, если Parse в Flowise не отдал situation_pending) */
+    situationAwaitingNote: false
   };
 
-  const LEAD_ENDPOINT = `${FLOWISE_BASE}/lead/send-lead`;
-  const CHAT_LOG_ENDPOINT = `${FLOWISE_BASE}/lead/chat-log`;
+  const LEAD_ENDPOINT = `${apiHost}/lead/send-lead`;
+  const CHAT_LOG_ENDPOINT = `${apiHost}/lead/chat-log`;
 
   // Определение рабочего времени (Камчатка, UTC+12)
   function isWorkingHours() {
@@ -593,22 +601,42 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (!Array.isArray(followupOpts)) followupOpts = [];
         // Сырые данные Structured Output → базовый объект
+        var conv = data.conversion;
+        if (conv && typeof conv === 'object' && conv.video && typeof conv.video === 'object') {
+          conv = {
+            video: {
+              title: String(conv.video.title || '').trim(),
+              url: String(conv.video.url || '').trim()
+            }
+          };
+        } else {
+          conv = null;
+        }
         var parsed = {
           answer: data.answer || data.text || '',
           ui: {
-            ctaIntent: data.ui_ctaIntent ?? data.ui?.ctaIntent ?? 'none'
+            ctaIntent: data.ui_ctaIntent ?? data.ui?.ctaIntent ?? 'none',
+            ctaLabel: typeof data.cta_label === 'string' && data.cta_label.trim()
+              ? data.cta_label.trim()
+              : ''
           },
           meta: {
             stage: data.meta_stage ?? data.meta?.stage ?? 'discovery',
             confidence: data.meta_confidence ?? data.meta?.confidence ?? 0,
             shouldHandoff: data.meta_shouldHandoff ?? data.meta?.shouldHandoff ?? false,
-            topic: data.meta_topic ?? data.meta?.topic ?? 'other'
+            topic: data.meta_topic ?? data.meta?.topic ?? 'other',
+            subtopic: data.meta_subtopic ?? data.meta?.subtopic ?? ''
           },
           flags: {
             emotional: data.flags_emotional ?? data.flags?.emotional ?? false
           },
           leadIntent: data.leadIntent ?? 'none',
           followup_options: followupOpts,
+          conversion: conv && conv.video && conv.video.url ? conv : null,
+          show_situation_button: !!data.show_situation_button,
+          situation_pending:
+            data.situation_pending === true ||
+            String(data.situation_pending || "").toLowerCase() === "true",
           isValid: true
         };
         return normalizeParsedResponse(parsed);
@@ -622,10 +650,13 @@ document.addEventListener("DOMContentLoaded", () => {
     return {
       answer: text,
       ui: { ctaIntent: 'none' },
-        meta: { stage: widgetState.currentStage, confidence: 0, shouldHandoff: false, topic: widgetState.currentTopic || 'other' },
+      meta: { stage: widgetState.currentStage, confidence: 0, shouldHandoff: false, topic: widgetState.currentTopic || 'other' },
       flags: { emotional: false },
       leadIntent: 'none',
       followup_options: [],
+      conversion: null,
+      show_situation_button: false,
+      situation_pending: false,
       isValid: false
     };
   }
@@ -644,6 +675,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (result.ui.ctaIntent !== 'booking' && result.ui.ctaIntent !== 'none') {
       result.ui.ctaIntent = 'none';
     }
+    if (typeof result.ui.ctaLabel !== 'string') result.ui.ctaLabel = '';
 
     // meta
     if (!result.meta || typeof result.meta !== 'object') {
@@ -653,6 +685,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof result.meta.confidence !== 'number') result.meta.confidence = 0;
       result.meta.shouldHandoff = !!result.meta.shouldHandoff;
       if (!result.meta.topic) result.meta.topic = 'other';
+      if (typeof result.meta.subtopic !== 'string') result.meta.subtopic = '';
     }
 
     // flags
@@ -709,7 +742,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
     result.followup_options = unique.slice(0, 3);
 
+    if (!result.conversion || typeof result.conversion !== 'object') {
+      result.conversion = null;
+    }
+
+    result.show_situation_button = !!result.show_situation_button;
+    if (typeof result.situation_pending === "string") {
+      result.situation_pending = result.situation_pending.toLowerCase() === "true";
+    } else {
+      result.situation_pending = !!result.situation_pending;
+    }
+
     return result;
+  }
+
+  /** Шаг «опишите ситуацию»: только «Назад к диалогу» + ввод текста (без handoff и записи). */
+  function isOnlyBackToDialogFollowups(parsed) {
+    var opts = parsed.followup_options;
+    if (!Array.isArray(opts) || opts.length !== 1) return false;
+    var o = opts[0];
+    var label = typeof o === "string" ? o : o && o.label;
+    if (!label) return false;
+    return String(label)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ") === "назад к диалогу";
   }
 
   // Отображение ответа бота
@@ -770,8 +827,79 @@ document.addEventListener("DOMContentLoaded", () => {
     msgs.scrollTop = msgs.scrollHeight;
   }
 
+  const SITUATION_BUTTON_QUERY = "Рассказать о своей ситуации";
+  const SIT_BACK_TO_DIALOG = "Назад к диалогу";
+  const VIDEO_REVEAL_LABEL = "Посмотреть видео с врачом";
+
+  function isBackToDialogText(s) {
+    return (
+      String(s || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ") === "назад к диалогу"
+    );
+  }
+
+  /** Кнопка; плеер вставляется только после клика (порядок: ответ → followup → видео → ситуация → CTA) */
+  function renderVideoRevealButton(video) {
+    if (!video || !video.url) return;
+    const wrap = document.createElement("div");
+    wrap.className = "botVideoRevealWrap";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "botVideoToggleBtn";
+    btn.textContent = VIDEO_REVEAL_LABEL;
+    btn.onclick = function () {
+      btn.remove();
+      const embed = document.createElement("div");
+      embed.className = "botVideoEmbed";
+      const v = document.createElement("video");
+      v.setAttribute("controls", "controls");
+      v.setAttribute("playsinline", "playsinline");
+      v.preload = "metadata";
+      const source = document.createElement("source");
+      source.src = video.url;
+      source.type = "video/mp4";
+      v.appendChild(source);
+      embed.appendChild(v);
+      if (video.title) {
+        const cap = document.createElement("div");
+        cap.className = "botVideoEmbedCaption";
+        cap.textContent = video.title;
+        embed.appendChild(cap);
+      }
+      wrap.appendChild(embed);
+      msgs.scrollTop = msgs.scrollHeight;
+    };
+    wrap.appendChild(btn);
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function renderSituationButton() {
+    const wrap = document.createElement("div");
+    wrap.className = "botSituationWrap";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "botSituationBtn";
+    btn.textContent = SITUATION_BUTTON_QUERY;
+    btn.onclick = function () {
+      wrap.remove();
+      input.value = "";
+      widgetState.hasInteracted = true;
+      widgetState.messageCount++;
+      widgetState.situationAwaitingNote = true;
+      hideStartMenu();
+      addMsg(SITUATION_BUTTON_QUERY, "user");
+      askFlowise(SITUATION_BUTTON_QUERY);
+    };
+    wrap.appendChild(btn);
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
   // Отображение кнопки CTA: booking или handoff
-  function renderCTAButton(type) {
+  function renderCTAButton(type, bookingLabel) {
     const existingCTA = msgs.querySelector(".botCTAButton");
     if (existingCTA) existingCTA.parentElement.remove();
 
@@ -784,10 +912,11 @@ document.addEventListener("DOMContentLoaded", () => {
         onHandoffClick();
       };
     } else {
-      ctaBtn.textContent = "Хочу записаться";
+      const label = (bookingLabel && String(bookingLabel).trim()) || "Записаться на консультацию";
+      ctaBtn.textContent = label;
       ctaBtn.onclick = () => {
         ctaBtn.parentElement.remove();
-        onCTAClick();
+        onCTAClick(label);
       };
     }
     ctaBtn.style.cssText = "margin: 8px 0; padding: 10px 16px; background: #4ECDC4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;";
@@ -799,8 +928,8 @@ document.addEventListener("DOMContentLoaded", () => {
     msgs.scrollTop = msgs.scrollHeight;
   }
 
-  function onCTAClick() {
-    const text = "Хочу записаться";
+  function onCTAClick(intentText) {
+    const text = (intentText && String(intentText).trim()) || "Записаться на консультацию";
     input.value = "";
     widgetState.hasInteracted = true;
     widgetState.messageCount++;
@@ -894,6 +1023,9 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("scroll", maybeShowScrollTeaser);
 
   async function askFlowise(text) {
+    if (isBackToDialogText(text)) {
+      widgetState.situationAwaitingNote = false;
+    }
     setFormLoading(true);
     showTypingIndicator();
     try {
@@ -941,7 +1073,7 @@ document.addEventListener("DOMContentLoaded", () => {
       widgetState.leadName = text;
     }
     
-    // Отображаем ответ бота
+    // Отображаем ответ бота; блоки действий — сразу под ответом: followup → видео (по клику) → ситуация → CTA
     renderAnswer(parsed.answer);
     widgetState.lastBotMessageTime = Date.now();
     // Лог ответа бота
@@ -983,68 +1115,91 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     
-    // Кнопки «узнать подробнее» и CTA.
-    // Полная матрица показа:
-    // - followup = навигация по теме (secondary‑кнопки)
-    // - CTA‑кнопка = переход к действию (primary), усиливается по глубине темы и длине диалога
+    // Кнопки: макс. 3 вместе с CTA (правило продукта). Порядок: followup → видео → «ситуация» → CTA.
     if (parsed.isValid) {
-      const hasFollowups = Array.isArray(parsed.followup_options) && parsed.followup_options.length > 0;
-      const followupCount = hasFollowups ? parsed.followup_options.length : 0;
-
-      // Обновляем глубину взаимодействия внутри темы:
-      // есть followup → считаем, что пользователь продолжает тему
-      // нет followup → тему считаем завершённой и обнуляем глубину
-      if (hasFollowups) {
-        widgetState.interactionDepth = (widgetState.interactionDepth || 0) + 1;
-      } else {
-        widgetState.interactionDepth = 0;
+      if (parsed.leadIntent === "awaiting_name") {
+        widgetState.situationAwaitingNote = false;
       }
 
-      // Показываем followup‑кнопки, если они есть и не идёт лид‑флоу
-      if (parsed.leadIntent === 'none' && hasFollowups) {
-        renderFollowupButtons(parsed.followup_options);
+      let followOpts = Array.isArray(parsed.followup_options) ? parsed.followup_options.slice() : [];
+      const onlyBackApi = isOnlyBackToDialogFollowups({ ...parsed, followup_options: followOpts });
+      const situationWaitInput =
+        parsed.leadIntent === "none" &&
+        (parsed.situation_pending === true ||
+          widgetState.situationAwaitingNote === true ||
+          onlyBackApi);
+
+      if (situationWaitInput && parsed.leadIntent === "none") {
+        if (!isOnlyBackToDialogFollowups({ ...parsed, followup_options: followOpts })) {
+          followOpts = [{ label: SIT_BACK_TO_DIALOG, query: SIT_BACK_TO_DIALOG }];
+        }
       }
 
-      const inLeadFlow = parsed.leadIntent !== 'none';
-      const needHandoff = parsed.meta.shouldHandoff === true;
+      const hasFollowups = followOpts.length > 0;
+      const followupCount = hasFollowups ? followOpts.length : 0;
 
-      // Исключения: активный lead flow или handoff / конфликт
-      if (needHandoff) {
-        renderCTAButton("handoff");
-      } else if (!inLeadFlow) {
+      const inLeadFlow = parsed.leadIntent !== "none";
+      const needHandoff = !situationWaitInput && parsed.meta.shouldHandoff === true;
+
+      let shouldShowBookingCTA = false;
+      if (!situationWaitInput && !inLeadFlow && !needHandoff) {
         const topicDepth = widgetState.interactionDepth || 0;
         const conversationCount = widgetState.botAnswerCount || 0;
-
-        // Матрица показа CTA‑кнопки по числу followup:
-        // A) followup_count >= 3
-        //    → CTA‑кнопка НЕТ (только текстовый CTA в ответе по промпту)
-        //
-        // B) followup_count == 2
-        //    → текстовый CTA да (через промпт)
-        //    → CTA‑кнопка ТОЛЬКО если диалог уже явно прогрет:
-        //       - botAnswerCount >= 4 ИЛИ topicDepth >= 2
-        //
-        // C) followup_count == 1
-        //    → CTA‑кнопка да
-        //
-        // D) followup_count == 0
-        //    → CTA‑кнопка да (финал ветки, вместе с текстовым CTA по промпту)
-        let shouldShowBookingCTA = false;
-
         if (followupCount >= 3) {
           shouldShowBookingCTA = false;
         } else if (followupCount === 2) {
-          shouldShowBookingCTA = (conversationCount >= 4 || topicDepth >= 2);
+          shouldShowBookingCTA = conversationCount >= 4 || topicDepth >= 2;
         } else if (followupCount === 1) {
           shouldShowBookingCTA = true;
         } else {
-          // followupCount === 0
           shouldShowBookingCTA = true;
         }
+      }
 
-        if (shouldShowBookingCTA) {
-          renderCTAButton("booking");
-        }
+      const ctaWillShow = needHandoff || shouldShowBookingCTA;
+      const maxSecondary = situationWaitInput ? 3 : ctaWillShow ? 2 : 3;
+      let budget = maxSecondary;
+      const nFollowRender = Math.min(followupCount, budget, 3);
+      budget -= nFollowRender;
+
+      // Обновляем глубину взаимодействия внутри темы (не считаем шаг «ситуация»)
+      if (hasFollowups && !situationWaitInput) {
+        widgetState.interactionDepth = (widgetState.interactionDepth || 0) + 1;
+      } else if (!hasFollowups && !situationWaitInput) {
+        widgetState.interactionDepth = 0;
+      }
+
+      if (parsed.leadIntent === "none" && nFollowRender > 0) {
+        renderFollowupButtons(followOpts.slice(0, nFollowRender));
+      }
+
+      const wantVideo =
+        !situationWaitInput &&
+        !needHandoff &&
+        parsed.conversion &&
+        parsed.conversion.video &&
+        parsed.conversion.video.url;
+      if (wantVideo && budget > 0) {
+        renderVideoRevealButton(parsed.conversion.video);
+        budget -= 1;
+      }
+
+      const wantSituation =
+        parsed.show_situation_button &&
+        parsed.leadIntent === "none" &&
+        !situationWaitInput &&
+        !needHandoff;
+      if (wantSituation && budget > 0) {
+        renderSituationButton();
+        budget -= 1;
+      }
+
+      if (situationWaitInput) {
+        // только «Назад» и поле ввода
+      } else if (needHandoff) {
+        renderCTAButton("handoff");
+      } else if (!inLeadFlow && shouldShowBookingCTA) {
+        renderCTAButton("booking", parsed.ui && parsed.ui.ctaLabel);
       }
     }
     } finally {
